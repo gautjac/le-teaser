@@ -73,7 +73,11 @@ function wrapLines(
   return lines;
 }
 
-/** Draw subtle film-grain noise over the whole card. */
+/**
+ * Draw a whisper of film grain: only a small fraction of cells get a very
+ * faint speckle, so the card reads textured — never noisy. `strength` is the
+ * raw palette grain (≈0.04–0.06); the peak dot alpha stays well under 0.1.
+ */
 function drawGrain(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -82,15 +86,17 @@ function drawGrain(
 ) {
   if (strength <= 0) return;
   const cell = 3;
+  const peak = Math.min(0.09, strength * 1.4); // max alpha per speckle
   ctx.save();
   for (let y = 0; y < h; y += cell) {
     for (let x = 0; x < w; x += cell) {
       const n = Math.random();
-      if (n > 0.55) {
-        ctx.fillStyle = `rgba(255,255,255,${(n - 0.55) * strength})`;
+      // ~8% of cells get a light fleck, ~5% a dark one — the rest stay clean.
+      if (n > 0.92) {
+        ctx.fillStyle = `rgba(255,255,255,${(n - 0.92) * (peak / 0.08)})`;
         ctx.fillRect(x, y, cell, cell);
-      } else if (n < 0.12) {
-        ctx.fillStyle = `rgba(0,0,0,${(0.12 - n) * strength * 1.4})`;
+      } else if (n < 0.05) {
+        ctx.fillStyle = `rgba(0,0,0,${(0.05 - n) * (peak / 0.05)})`;
         ctx.fillRect(x, y, cell, cell);
       }
     }
@@ -166,7 +172,7 @@ export async function renderCard(
   ctx.fillStyle = palette.accent;
   roundRect(ctx, pad, metaY, dayW, chipH, chipH / 2);
   ctx.fill();
-  ctx.fillStyle = palette.dark && palette.accent !== "#0d0b12" ? "#0d0b12" : contrastInk(palette.accent);
+  ctx.fillStyle = contrastInk(palette.accent);
   ctx.textAlign = "left";
   ctx.fillText(dayText, pad + chipPadX, metaY + chipH / 2 + metaFont * 0.04);
 
@@ -236,8 +242,8 @@ export async function renderCard(
   ctx.fillText("· le teaser", w - pad, footY);
   ctx.textAlign = "left";
 
-  // --- Grain on top ---
-  drawGrain(ctx, w, h, palette.grain * 255);
+  // --- Grain on top (raw palette grain, ≈0.04–0.06) ---
+  drawGrain(ctx, w, h, palette.grain);
 }
 
 function hexToRgba(hex: string, a: number): string {
