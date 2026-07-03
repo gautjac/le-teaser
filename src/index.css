@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-studio text-bone font-sans antialiased;
+    background-image:
+      radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      radial-gradient(circle at 15% -10%, rgba(255, 90, 60, 0.12), transparent 45%),
+      radial-gradient(circle at 90% 110%, rgba(154, 123, 255, 0.1), transparent 45%);
+    background-size: 22px 22px, 100% 100%, 100% 100%;
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: #ff5a3c;
+    color: #0d0b12;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #3a3348 transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #3a3348;
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full font-sans font-medium
+      transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-flare text-studio px-6 py-3 hover:bg-flare-soft hover:shadow-pop
+      active:translate-y-px;
+  }
+  .btn-ghost {
+    @apply btn border border-studio-line bg-studio-raise/60 px-4 py-2.5 text-bone-dim
+      hover:border-flare/60 hover:text-bone;
+  }
+  .btn-chip {
+    @apply btn border border-studio-line bg-studio-card px-3.5 py-1.5 text-sm text-bone-dim
+      hover:border-flare/60 hover:text-bone;
+  }
+  .field {
+    @apply w-full rounded-2xl border border-studio-line bg-studio-raise/70 px-4 py-3
+      font-sans text-bone placeholder:text-bone-faint outline-none transition-colors
+      focus:border-flare/70 focus:ring-2 focus:ring-flare/25;
+  }
+  .label {
+    @apply mb-2 block font-mono text-[11px] uppercase tracking-[0.18em] text-bone-faint;
+  }
+  .panel {
+    @apply rounded-3xl border border-studio-line bg-studio-raise/70 backdrop-blur-sm;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
