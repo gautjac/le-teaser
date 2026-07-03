@@ -245,12 +245,16 @@ export function validate(
   return { appName, tagline, posts };
 }
 
-export async function plan(req: PlanRequest): Promise<PlanResult> {
-  const lang: Lang = req.lang === "en" ? "en" : "fr";
-  const vibe: Vibe =
-    req.vibe && VIBE_GUIDE[req.vibe] ? req.vibe : "build-in-public";
-  const guide = VIBE_GUIDE[vibe][lang];
-
+/**
+ * Run one slice of the week (a contiguous set of days). Kept small so each
+ * call finishes well under Netlify's function budget; slices run in parallel.
+ */
+async function planSlice(
+  req: PlanRequest,
+  lang: Lang,
+  guide: string,
+  days: number[],
+): Promise<{ appName?: string; tagline?: string; posts?: RawPost[] }> {
   const userText = [
     "THE APP (Jac's own words):",
     (req.pitch ?? "").slice(0, 4000) || "(no written pitch)",
@@ -259,17 +263,19 @@ export async function plan(req: PlanRequest): Promise<PlanResult> {
     "",
     `VIBE FOR THE WEEK: ${guide}`,
     "",
+    `THE FULL WEEK IS DAYS 1–7. You are writing ONLY days ${days.join(", ")} of that same week — a coordinated slice of one strategy, not a standalone burst. Keep platforms and formats varied WITHIN your slice and appropriate to where these days fall in the arc (early = setup/teasing/origin, middle = the reveal or a meaty feature/decision, late = reactions, a question, a quiet "it's live", a reflection).`,
+    "",
     lang === "en"
       ? "Write everything in English, in Jac's dry builder-in-public voice."
       : "Écris tout en français québécois naturel, dans la voix posée et sans hype de Jac.",
-    "Produce EXACTLY 7 posts (day 1–7). Respond only by calling deliver_calendar.",
+    `Produce EXACTLY ${days.length} posts, one for each of days ${days.join(", ")}. Respond only by calling deliver_calendar.`,
   ]
     .filter(Boolean)
     .join("\n");
 
   const res = await client().messages.create({
     model: MODEL,
-    max_tokens: 5000,
+    max_tokens: 3200,
     system: SYSTEM_BASE + LANG_DIRECTIVE[lang],
     messages: [{ role: "user", content: userText }],
     tools: [TOOL],
@@ -284,8 +290,47 @@ export async function plan(req: PlanRequest): Promise<PlanResult> {
         : "Aucun calendrier renvoyé par le planificateur.",
     );
   }
-  return validate(
-    tool.input as { appName?: string; tagline?: string; posts?: RawPost[] },
-    lang,
+  return tool.input as { appName?: string; tagline?: string; posts?: RawPost[] };
+}
+
+export async function plan(req: PlanRequest): Promise<PlanResult> {
+  const lang: Lang = req.lang === "en" ? "en" : "fr";
+  const vibe: Vibe =
+    req.vibe && VIBE_GUIDE[req.vibe] ? req.vibe : "build-in-public";
+  const guide = VIBE_GUIDE[vibe][lang];
+
+  // Split the week into three small slices that run concurrently. The largest
+  // is only 3 posts, so every call finishes comfortably inside the function
+  // budget where one 7-post call would time out. The lead slice owns
+  // appName/tagline; days are stitched back into one sorted 7-post calendar.
+  const slices: number[][] = [
+    [1, 2, 3],
+    [4, 5],
+    [6, 7],
+  ];
+  const [s1, s2, s3] = await Promise.all(
+    slices.map((days) => planSlice(req, lang, guide, days)),
   );
+
+  // Force each slice's posts onto its assigned day range so a model that
+  // mis-numbers still merges into a clean 1–7 week.
+  const stitch = (
+    out: { posts?: RawPost[] },
+    days: number[],
+  ): RawPost[] =>
+    (out.posts ?? [])
+      .slice(0, days.length)
+      .map((p, i) => ({ ...p, day: days[i] }));
+
+  const merged = {
+    appName: s1.appName || s2.appName || s3.appName,
+    tagline: s1.tagline || s2.tagline || s3.tagline,
+    posts: [
+      ...stitch(s1, slices[0]),
+      ...stitch(s2, slices[1]),
+      ...stitch(s3, slices[2]),
+    ],
+  };
+
+  return validate(merged, lang);
 }
