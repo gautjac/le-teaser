@@ -255,14 +255,20 @@ async function planSlice(
   guide: string,
   days: number[],
 ): Promise<{ appName?: string; tagline?: string; posts?: RawPost[] }> {
-  const userText = [
+  // The app itself (pitch, link, vibe) is the same for all three slices, so it
+  // leads the user turn as its own block, ending on a cache breakpoint. Only
+  // the slice's days follow it.
+  const appText = [
     "THE APP (Jac's own words):",
     (req.pitch ?? "").slice(0, 4000) || "(no written pitch)",
     "",
     req.url ? `LINK: ${req.url.slice(0, 300)}` : "",
     "",
     `VIBE FOR THE WEEK: ${guide}`,
-    "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const sliceText = [
     `THE FULL WEEK IS DAYS 1–7. You are writing ONLY days ${days.join(", ")} of that same week — a coordinated slice of one strategy, not a standalone burst. Keep platforms and formats varied WITHIN your slice and appropriate to where these days fall in the arc (early = setup/teasing/origin, middle = the reveal or a meaty feature/decision, late = reactions, a question, a quiet "it's live", a reflection).`,
     "",
     lang === "en"
@@ -276,11 +282,26 @@ async function planSlice(
   const res = await client().messages.create({
     model: MODEL,
     max_tokens: 3200,
-    system: SYSTEM_BASE + LANG_DIRECTIVE[lang],
-    messages: [{ role: "user", content: userText }],
+    // Tools + system are identical for every slice of every plan in a language.
+    system: [
+      { type: "text", text: SYSTEM_BASE + LANG_DIRECTIVE[lang], cache_control: { type: "ephemeral" } },
+    ],
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: appText, cache_control: { type: "ephemeral" } },
+          { type: "text", text: sliceText },
+        ],
+      },
+    ],
     tools: [TOOL],
     tool_choice: { type: "tool", name: "deliver_calendar" },
   });
+  const u = res.usage;
+  console.log(
+    `[le-teaser] days ${days.join(",")}: input=${u.input_tokens} cache_read=${u.cache_read_input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0} output=${u.output_tokens}`,
+  );
 
   const tool = res.content.find((b) => b.type === "tool_use");
   if (!tool || tool.type !== "tool_use") {
@@ -292,6 +313,13 @@ async function planSlice(
   }
   return tool.input as { appName?: string; tagline?: string; posts?: RawPost[] };
 }
+
+/**
+ * The lead slice's head start before the other two are sent. A few seconds
+ * covers Opus reading the prompt; it then spends far longer writing, so the
+ * week finishes barely later.
+ */
+export const HEAD_START_MS = 4000;
 
 export async function plan(req: PlanRequest): Promise<PlanResult> {
   const lang: Lang = req.lang === "en" ? "en" : "fr";
@@ -308,9 +336,21 @@ export async function plan(req: PlanRequest): Promise<PlanResult> {
     [4, 5],
     [6, 7],
   ];
-  const [s1, s2, s3] = await Promise.all(
-    slices.map((days) => planSlice(req, lang, guide, days)),
-  );
+  // The three slices share tools, system and the app block, and that prefix is
+  // cached — but a cache entry only becomes readable once the request writing
+  // it has started answering, so three requests fired together would all pay
+  // full price. The lead slice goes first; the other two follow after a short
+  // head start (sooner if it finishes first). If it fails first, the plan fails
+  // anyway, so the other two are never sent.
+  const first = planSlice(req, lang, guide, slices[0]);
+  const headStart = Promise.race([
+    new Promise<void>((resolve) => setTimeout(resolve, HEAD_START_MS)),
+    first.then(() => undefined),
+  ]);
+  const [s1, s2, s3] = await Promise.all([
+    first,
+    ...slices.slice(1).map((days) => headStart.then(() => planSlice(req, lang, guide, days))),
+  ]);
 
   // Force each slice's posts onto its assigned day range so a model that
   // mis-numbers still merges into a clean 1–7 week.
